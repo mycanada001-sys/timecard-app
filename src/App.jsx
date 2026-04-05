@@ -147,6 +147,7 @@ function ClockScreen({ onAdmin, employees }) {
   const streamRef  = useRef(null);
   const cameraReady = useRef(false);
   const [stream, setStream]         = useState(null);
+  const [cameraError, setCameraError] = useState(null);
 
   // Live listener for active records
   useEffect(() => {
@@ -170,7 +171,7 @@ function ClockScreen({ onAdmin, employees }) {
           };
         }
       })
-      .catch(err => console.error("Camera error:", err));
+      .catch(err => { console.error("Camera error:", err); setCameraError(err.message); });
     return () => { if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()); };
   }, []);
 
@@ -252,6 +253,11 @@ function ClockScreen({ onAdmin, employees }) {
         {/* Camera preview */}
         <video ref={videoRef} autoPlay playsInline muted
           style={{ width: "100%", borderRadius: "var(--border-radius-md)", marginBottom: "1.25rem", aspectRatio: "4/3", objectFit: "cover", display: stream ? "block" : "none" }} />
+        {cameraError && (
+          <div style={{ ...S.banner("error"), marginBottom: "1rem", fontSize: "12px" }}>
+            Camera error: {cameraError}
+          </div>
+        )}
 
         {!identified ? (
           <>
