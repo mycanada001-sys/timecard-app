@@ -11,7 +11,21 @@ import { db } from "./firebase";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const LOCATIONS  = ["Gibraltar", "Lorimar"];
-const ADMIN_PIN  = "0000"; // Change this — and ideally move to env var
+let ADMIN_PIN    = "0000"; // overwritten on load from Firestore _meta/adminPin
+
+async function loadAdminPin() {
+  try {
+    const snap = await getDocs(collection(db, "_meta"));
+    snap.forEach(d => { if (d.id === "adminPin" && d.data().pin) ADMIN_PIN = d.data().pin; });
+  } catch {}
+}
+
+async function saveAdminPin(newPin) {
+  await updateDoc(doc(db, "_meta", "adminPin"), { pin: newPin }).catch(async () => {
+    await addDoc(collection(db, "_meta"), { pin: newPin });
+  });
+  ADMIN_PIN = newPin;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function now()          { return new Date(); }
@@ -20,6 +34,62 @@ function fmt(ts)        { const d = tsToDate(ts); return d ? d.toLocaleTimeStrin
 function fmtDate(ts)    { const d = tsToDate(ts); return d ? d.toLocaleDateString("en-CA") : "—"; }
 function fmtDuration(ms){ if (!ms || ms < 0) return "—"; const h = Math.floor(ms/3600000); const m = Math.floor((ms%3600000)/60000); return `${h}h ${m.toString().padStart(2,"0")}m`; }
 function durMs(r)       { const i = tsToDate(r.clockIn); const o = tsToDate(r.clockOut) || now(); return i ? o - i : 0; }
+
+function exportPDF(records, periodLabel) {
+  const grouped = {};
+  records.forEach(r => {
+    if (!grouped[r.employee]) grouped[r.employee] = [];
+    grouped[r.employee].push(r);
+  });
+
+  let html = `
+    <html><head><style>
+      body { font-family: Arial, sans-serif; font-size: 12px; color: #222; margin: 0; padding: 20px; }
+      h1 { font-size: 18px; margin-bottom: 4px; }
+      h2 { font-size: 14px; margin: 20px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+      th { background: #f5f5f5; text-align: left; padding: 6px 8px; font-size: 11px; border-bottom: 1px solid #ddd; }
+      td { padding: 6px 8px; border-bottom: 1px solid #eee; }
+      .total { font-weight: bold; background: #f9f9f9; }
+      .header { display: flex; justify-content: space-between; margin-bottom: 16px; }
+      .subtitle { color: #666; font-size: 12px; }
+    </style></head><body>
+    <div class="header">
+      <div><h1>TimeCard Report</h1><div class="subtitle">Gibraltar &amp; Lorimar · ${periodLabel}</div></div>
+      <div class="subtitle">Generated: ${new Date().toLocaleDateString("en-CA")}</div>
+    </div>`;
+
+  let grandTotal = 0;
+  Object.entries(grouped).forEach(([name, recs]) => {
+    const totalMs = recs.reduce((a, r) => a + durMs(r), 0);
+    grandTotal += totalMs;
+    html += `<h2>${name}</h2>
+      <table>
+        <thead><tr><th>Date</th><th>Location</th><th>In</th><th>Out</th><th>Duration</th><th>Status</th></tr></thead>
+        <tbody>`;
+    recs.forEach(r => {
+      html += `<tr>
+        <td>${fmtDate(r.clockIn)}</td>
+        <td>${r.location}</td>
+        <td>${fmt(r.clockIn)}</td>
+        <td>${fmt(r.clockOut)}</td>
+        <td>${fmtDuration(durMs(r))}</td>
+        <td>${r.clockOut ? "Complete" : "Active"}</td>
+      </tr>`;
+    });
+    html += `<tr class="total"><td colspan="4">Total</td><td>${fmtDuration(totalMs)}</td><td></td></tr>
+        </tbody></table>`;
+  });
+
+  html += `<div style="margin-top:16px;padding-top:8px;border-top:2px solid #ddd;font-weight:bold;">
+    Grand total: ${fmtDuration(grandTotal)} across ${records.length} entries
+  </div></body></html>`;
+
+  const win = window.open("", "_blank");
+  win.document.write(html);
+  win.document.close();
+  win.print();
+}
 
 function exportCSV(records) {
   const header = "ID,Employee,Location,Date,Clock In,Clock Out,Duration\n";
@@ -501,9 +571,13 @@ function AdminScreen({ onBack, employees }) {
   const [tab, setTab]     = useState("today");
   const [msg, setMsg]     = useState(null);
   const [records, setRecords] = useState([]);
-  const [editing, setEditing]       = useState(null);
-  const [editOut, setEditOut]       = useState("");
-  const [viewingPhoto, setViewingPhoto] = useState(null); // { photoIn, photoOut, employee }
+  const [editing, setEditing]           = useState(null);
+  const [editOut, setEditOut]           = useState("");
+  const [viewingPhoto, setViewingPhoto] = useState(null);
+  const [changingPin, setChangingPin]   = useState(false);
+  const [newAdminPin, setNewAdminPin]   = useState("");
+  const [confirmAdminPin, setConfirmAdminPin] = useState("");
+  const [pinMsg, setPinMsg]             = useState(null);
 
   useEffect(() => {
     if (pin.length === 4) {
@@ -519,6 +593,19 @@ function AdminScreen({ onBack, employees }) {
     const unsub = onSnapshot(q, snap => setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     return unsub;
   }, [authed]);
+
+  async function changeAdminPin() {
+    if (newAdminPin.length !== 4 || !/^\d{4}$/.test(newAdminPin)) {
+      setPinMsg({ type: "error", text: "PIN must be exactly 4 digits." }); return;
+    }
+    if (newAdminPin !== confirmAdminPin) {
+      setPinMsg({ type: "error", text: "PINs don't match." }); return;
+    }
+    await saveAdminPin(newAdminPin);
+    setNewAdminPin(""); setConfirmAdminPin(""); setChangingPin(false);
+    setPinMsg({ type: "success", text: "Admin PIN updated successfully." });
+    setTimeout(() => setPinMsg(null), 3000);
+  }
 
   async function saveEdit(record) {
     if (!editOut) return;
@@ -564,9 +651,11 @@ function AdminScreen({ onBack, employees }) {
       <div style={S.adminWrap}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem", flexWrap: "wrap", gap: "8px" }}>
           <div style={{ fontSize: "16px", fontWeight: "500", color: "var(--color-text-primary)" }}>Admin dashboard</div>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button style={{ ...S.actionBtn("blue"), width: "auto", padding: "8px 16px", marginBottom: 0 }} onClick={() => exportCSV(filtered)}>Export CSV</button>
-            <button style={{ ...S.actionBtn(""), width: "auto", padding: "8px 16px", marginBottom: 0 }} onClick={onBack}>← Clock screen</button>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            <button style={{ ...S.actionBtn("blue"), width: "auto", padding: "8px 16px", marginBottom: 0 }} onClick={() => exportCSV(filtered)}>CSV</button>
+            <button style={{ ...S.actionBtn("green"), width: "auto", padding: "8px 16px", marginBottom: 0 }} onClick={() => exportPDF(filtered, tab === "today" ? "Today" : tab === "week" ? "This week" : "All records")}>PDF</button>
+            <button style={{ ...S.actionBtn(""), width: "auto", padding: "8px 16px", marginBottom: 0 }} onClick={() => setChangingPin(!changingPin)}>Change PIN</button>
+            <button style={{ ...S.actionBtn(""), width: "auto", padding: "8px 16px", marginBottom: 0 }} onClick={onBack}>← Back</button>
           </div>
         </div>
 
@@ -575,6 +664,29 @@ function AdminScreen({ onBack, employees }) {
           <div style={S.statCard}><div style={S.statLabel}>Entries today</div><div style={S.statValue}>{todayRecords.length}</div></div>
           <div style={S.statCard}><div style={S.statLabel}>Hours today</div><div style={S.statValue}>{fmtDuration(totalTodayMs)}</div></div>
         </div>
+
+        {changingPin && (
+          <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "1rem 1.25rem", marginBottom: "1.5rem" }}>
+            <div style={{ fontSize: "13px", fontWeight: "500", marginBottom: "12px", color: "var(--color-text-primary)" }}>Change admin PIN</div>
+            {pinMsg && <div style={{ ...S.banner(pinMsg.type), marginBottom: "12px" }}>{pinMsg.text}</div>}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "8px", alignItems: "end" }}>
+              <div>
+                <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "4px" }}>New PIN</div>
+                <input type="password" maxLength={4} value={newAdminPin} onChange={e => setNewAdminPin(e.target.value.replace(/\D/g,""))}
+                  placeholder="4 digits"
+                  style={{ width: "100%", padding: "8px 10px", fontSize: "13px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "4px" }}>Confirm PIN</div>
+                <input type="password" maxLength={4} value={confirmAdminPin} onChange={e => setConfirmAdminPin(e.target.value.replace(/\D/g,""))}
+                  placeholder="4 digits"
+                  style={{ width: "100%", padding: "8px 10px", fontSize: "13px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }} />
+              </div>
+              <button style={{ ...S.actionBtn("green"), width: "auto", padding: "8px 16px", marginBottom: 0, fontSize: "13px" }}
+                onClick={changeAdminPin}>Save</button>
+            </div>
+          </div>
+        )}
 
         <div style={S.tabRow}>
           {["today","week","all"].map(t => (
@@ -691,8 +803,9 @@ export default function App() {
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, []);
 
-  // Seed + load employees once
+  // Load admin PIN + employees
   useEffect(() => {
+    loadAdminPin();
     const q = query(collection(db, "employees"), orderBy("name"));
     const unsub = onSnapshot(q, snap => {
       setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() })));
