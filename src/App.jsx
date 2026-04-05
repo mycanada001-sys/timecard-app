@@ -589,6 +589,13 @@ function AdminScreen({ onBack, employees }) {
   const [dateFrom, setDateFrom]         = useState("");
   const [dateTo, setDateTo]             = useState("");
   const [filterEmp, setFilterEmp]       = useState("all");
+  const [addingEntry, setAddingEntry]   = useState(false);
+  const [manualEmp, setManualEmp]       = useState("");
+  const [manualLoc, setManualLoc]       = useState(LOCATIONS[0]);
+  const [manualDate, setManualDate]     = useState("");
+  const [manualIn, setManualIn]         = useState("");
+  const [manualOut, setManualOut]       = useState("");
+  const [manualMsg, setManualMsg]       = useState(null);
 
   useEffect(() => {
     if (pin.length === 4) {
@@ -616,6 +623,33 @@ function AdminScreen({ onBack, employees }) {
     setNewAdminPin(""); setConfirmAdminPin(""); setChangingPin(false);
     setPinMsg({ type: "success", text: "Admin PIN updated successfully." });
     setTimeout(() => setPinMsg(null), 3000);
+  }
+
+  async function saveManualEntry() {
+    if (!manualEmp) return setManualMsg({ type: "error", text: "Select an employee." });
+    if (!manualDate) return setManualMsg({ type: "error", text: "Enter a date." });
+    if (!manualIn) return setManualMsg({ type: "error", text: "Enter a clock-in time." });
+    const [ih, im] = manualIn.split(":").map(Number);
+    const clockInDate = new Date(manualDate); clockInDate.setHours(ih, im, 0, 0);
+    let clockOutDate = null;
+    if (manualOut) {
+      const [oh, om] = manualOut.split(":").map(Number);
+      clockOutDate = new Date(manualDate); clockOutDate.setHours(oh, om, 0, 0);
+      if (clockOutDate <= clockInDate) return setManualMsg({ type: "error", text: "Clock-out must be after clock-in." });
+    }
+    const emp = employees.find(e => e.name === manualEmp);
+    await addDoc(collection(db, "timecards"), {
+      employeeId: emp?.id || "manual",
+      employee:   manualEmp,
+      location:   manualLoc,
+      clockIn:    Timestamp.fromDate(clockInDate),
+      clockOut:   clockOutDate ? Timestamp.fromDate(clockOutDate) : null,
+      photoIn:    null, photoOut: null,
+      manual:     true,
+    });
+    setManualMsg({ type: "success", text: `Entry added for ${manualEmp}.` });
+    setManualEmp(""); setManualDate(""); setManualIn(""); setManualOut("");
+    setTimeout(() => { setManualMsg(null); setAddingEntry(false); }, 2000);
   }
 
   async function saveEdit(record) {
@@ -796,6 +830,58 @@ function AdminScreen({ onBack, employees }) {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+
+        {/* Manual entry */}
+        <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "1rem 1.25rem", marginBottom: "1.5rem" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: addingEntry ? "12px" : "0" }}>
+            <div style={{ fontSize: "13px", fontWeight: "500", color: "var(--color-text-primary)" }}>Add missed entry</div>
+            <button style={{ ...S.actionBtn("amber"), width: "auto", padding: "6px 14px", marginBottom: 0, fontSize: "13px" }}
+              onClick={() => { setAddingEntry(!addingEntry); setManualMsg(null); }}>
+              {addingEntry ? "Cancel" : "+ Add entry"}
+            </button>
+          </div>
+          {addingEntry && (
+            <div>
+              {manualMsg && <div style={{ ...S.banner(manualMsg.type), marginBottom: "12px" }}>{manualMsg.text}</div>}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "8px" }}>
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "4px" }}>Employee</div>
+                  <select value={manualEmp} onChange={e => setManualEmp(e.target.value)}
+                    style={{ width: "100%", padding: "8px 10px", fontSize: "13px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }}>
+                    <option value="">Select employee</option>
+                    {employees.filter(e => e.active).map(e => <option key={e.id} value={e.name}>{e.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "4px" }}>Location</div>
+                  <select value={manualLoc} onChange={e => setManualLoc(e.target.value)}
+                    style={{ width: "100%", padding: "8px 10px", fontSize: "13px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }}>
+                    {LOCATIONS.map(l => <option key={l}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "4px" }}>Date</div>
+                  <input type="date" value={manualDate} onChange={e => setManualDate(e.target.value)}
+                    style={{ width: "100%", padding: "8px 10px", fontSize: "13px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", boxSizing: "border-box" }} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "4px" }}>Clock in</div>
+                    <input type="time" value={manualIn} onChange={e => setManualIn(e.target.value)}
+                      style={{ width: "100%", padding: "8px 10px", fontSize: "13px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginBottom: "4px" }}>Clock out</div>
+                    <input type="time" value={manualOut} onChange={e => setManualOut(e.target.value)}
+                      style={{ width: "100%", padding: "8px 10px", fontSize: "13px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", boxSizing: "border-box" }} />
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginBottom: "8px" }}>Clock-out is optional — leave blank if still unknown.</div>
+              <button style={{ ...S.actionBtn("green"), marginBottom: 0 }} onClick={saveManualEntry}>Save entry</button>
+            </div>
           )}
         </div>
 
