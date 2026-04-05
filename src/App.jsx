@@ -10,7 +10,8 @@ import {
 import { db } from "./firebase";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const LOCATIONS  = ["Gibraltar", "Lorimar"];
+const LOCATIONS    = ["Gibraltar", "Lorimar"];
+const DEVICE_CODES = ["GIBRALTAR01", "LORIMAR01", "ADMIN2024"]; // secret setup codes
 let ADMIN_PIN    = "0000"; // overwritten on load from Firestore _meta/adminPin
 
 async function loadAdminPin() {
@@ -787,12 +788,53 @@ function AdminScreen({ onBack, employees }) {
   );
 }
 
+// ─── Device Setup ─────────────────────────────────────────────────────────────
+function DeviceSetup({ onAuth }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState(null);
+
+  function tryCode() {
+    if (DEVICE_CODES.includes(code.trim().toUpperCase())) {
+      onAuth();
+    } else {
+      setError("Invalid code. Contact your manager.");
+      setTimeout(() => setError(null), 3000);
+      setCode("");
+    }
+  }
+
+  return (
+    <div style={{ ...S.app, alignItems: "center", justifyContent: "center", background: "var(--color-background-tertiary)" }}>
+      <div style={{ ...S.clockCard, maxWidth: "360px", textAlign: "center" }}>
+        <div style={{ fontSize: "22px", fontWeight: "500", color: "var(--color-text-primary)", marginBottom: "8px" }}>TimeCard</div>
+        <div style={{ fontSize: "13px", color: "var(--color-text-secondary)", marginBottom: "2rem" }}>
+          This device needs to be authorized before use. Enter the setup code provided by your manager.
+        </div>
+        {error && <div style={{ ...S.banner("error"), marginBottom: "1rem" }}>{error}</div>}
+        <input
+          value={code}
+          onChange={e => setCode(e.target.value.toUpperCase())}
+          placeholder="Enter setup code"
+          style={{ width: "100%", padding: "12px", fontSize: "16px", textAlign: "center", letterSpacing: "3px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", marginBottom: "12px", boxSizing: "border-box" }}
+        />
+        <button
+          onClick={tryCode}
+          style={{ ...S.actionBtn("blue"), marginBottom: 0 }}>
+          Authorize device
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── App Root ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [screen, setScreen]       = useState("clock");
   const [employees, setEmployees] = useState([]);
   const [online, setOnline]       = useState(navigator.onLine);
   const [loading, setLoading]     = useState(true);
+  const [deviceAuth, setDeviceAuth] = useState(() => localStorage.getItem("tc_device_auth") === "true");
+
 
   // Online/offline detection
   useEffect(() => {
@@ -813,6 +855,10 @@ export default function App() {
     });
     return unsub;
   }, []);
+
+  if (!deviceAuth) return (
+    <DeviceSetup onAuth={() => { localStorage.setItem("tc_device_auth", "true"); setDeviceAuth(true); }} />
+  );
 
   if (loading) return (
     <div style={{ ...S.app, alignItems: "center", justifyContent: "center" }}>
