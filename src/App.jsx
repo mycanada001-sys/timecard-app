@@ -402,10 +402,10 @@ function ClockScreen({ onAdmin, employees }) {
           </>
         )}
 
-        {/* Forgot clock-out warnings — anyone over 10 hours */}
-        {activeRecords.filter(r => { const d = tsToDate(r.clockIn); return d && (new Date() - d) > 10 * 3600000; }).map(r => (
+        {/* Forgot clock-out warnings — anyone over 12 hours */}
+        {activeRecords.filter(r => { const d = tsToDate(r.clockIn); return d && (new Date() - d) > 12 * 3600000; }).map(r => (
           <div key={"warn-"+r.id} style={{ ...S.banner("error"), marginTop: "0.75rem", fontSize: "13px" }}>
-            ⚠ {r.employee} has been clocked in for over 10 hours — did they forget to clock out?
+            ⚠ {r.employee} has been clocked in for over 12 hours — did they forget to clock out?
           </div>
         ))}
 
