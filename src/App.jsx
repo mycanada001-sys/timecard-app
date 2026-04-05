@@ -402,6 +402,13 @@ function ClockScreen({ onAdmin, employees }) {
           </>
         )}
 
+        {/* Forgot clock-out warnings — anyone over 10 hours */}
+        {activeRecords.filter(r => { const d = tsToDate(r.clockIn); return d && (new Date() - d) > 10 * 3600000; }).map(r => (
+          <div key={"warn-"+r.id} style={{ ...S.banner("error"), marginTop: "0.75rem", fontSize: "13px" }}>
+            ⚠ {r.employee} has been clocked in for over 10 hours — did they forget to clock out?
+          </div>
+        ))}
+
         {/* Currently clocked in — two column layout */}
         {activeRecords.length > 0 && (
           <div style={{ marginTop: "1.25rem" }}>
@@ -579,6 +586,9 @@ function AdminScreen({ onBack, employees }) {
   const [newAdminPin, setNewAdminPin]   = useState("");
   const [confirmAdminPin, setConfirmAdminPin] = useState("");
   const [pinMsg, setPinMsg]             = useState(null);
+  const [dateFrom, setDateFrom]         = useState("");
+  const [dateTo, setDateTo]             = useState("");
+  const [filterEmp, setFilterEmp]       = useState("all");
 
   useEffect(() => {
     if (pin.length === 4) {
@@ -638,8 +648,13 @@ function AdminScreen({ onBack, employees }) {
   const filtered = records.filter(r => {
     const d = tsToDate(r.clockIn);
     if (!d) return false;
-    if (tab === "today") return d >= todayStart;
-    if (tab === "week")  return d >= weekStart;
+    if (tab === "today") { if (d < todayStart) return false; }
+    else if (tab === "week") { if (d < weekStart) return false; }
+    else if (tab === "range") {
+      if (dateFrom) { const from = new Date(dateFrom); from.setHours(0,0,0,0); if (d < from) return false; }
+      if (dateTo)   { const to   = new Date(dateTo);   to.setHours(23,59,59,999); if (d > to) return false; }
+    }
+    if (filterEmp !== "all" && r.employee !== filterEmp) return false;
     return true;
   });
 
@@ -689,12 +704,43 @@ function AdminScreen({ onBack, employees }) {
           </div>
         )}
 
-        <div style={S.tabRow}>
-          {["today","week","all"].map(t => (
-            <button key={t} style={S.tab(tab===t)} onClick={() => setTab(t)}>
-              {t==="today"?"Today":t==="week"?"This week":"All records"}
-            </button>
-          ))}
+        <div style={{ marginBottom: "1.5rem" }}>
+          <div style={S.tabRow}>
+            {["today","week","all","range"].map(t => (
+              <button key={t} style={S.tab(tab===t)} onClick={() => setTab(t)}>
+                {t==="today"?"Today":t==="week"?"This week":t==="all"?"All":"Date range"}
+              </button>
+            ))}
+          </div>
+
+          {tab === "range" && (
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>From</span>
+                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                  style={{ padding: "6px 10px", fontSize: "13px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>To</span>
+                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                  style={{ padding: "6px 10px", fontSize: "13px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }} />
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>Employee</span>
+            <select value={filterEmp} onChange={e => setFilterEmp(e.target.value)}
+              style={{ padding: "6px 10px", fontSize: "13px", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }}>
+              <option value="all">All employees</option>
+              {[...new Set(records.map(r => r.employee))].sort().map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+            <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginLeft: "auto" }}>
+              {filtered.length} record{filtered.length !== 1 ? "s" : ""} · {fmtDuration(filtered.reduce((a,r) => a + durMs(r), 0))} total
+            </span>
+          </div>
         </div>
 
         <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: "1.5rem" }}>
