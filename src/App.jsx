@@ -157,7 +157,7 @@ function ClockScreen({ onAdmin, employees }) {
 
   // Auto-start camera
   useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
       .then(s => {
         streamRef.current = s;
         setStream(s);
